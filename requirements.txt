@@ -1,0 +1,17 @@
+torch
+torchvision
+pillow
+faiss-cpu
+tqdm
+pandas
+numpy
+scikit-learn
+clip-anytorch
+gradio
+opencv-python
+imagehash
+matplotlib
+annoy
+streamlit
+duckduckgo-search
+requests
