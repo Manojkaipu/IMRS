@@ -70,7 +70,9 @@ class FaissIndex(AnnIndex):
             if name == "ivf_flat":
                 self.index = faiss.IndexIVFFlat(self._quantizer, d, nlist, metric)
             else:
-                self.index = faiss.IndexIVFPQ(self._quantizer, d, nlist, pq_m or auto_pq_m(d), 8, metric)
+                # each PQ codebook has 2**nbits centroids and needs at least that many training points
+                nbits = int(min(8, max(1, math.floor(math.log2(max(2, n_train_hint))))))
+                self.index = faiss.IndexIVFPQ(self._quantizer, d, nlist, pq_m or auto_pq_m(d), nbits, metric)
             self.index.nprobe = min(nprobe, nlist)
         else:
             raise ValueError(name)

@@ -1,8 +1,8 @@
 """Dynamic dataset expansion: when the index has no good match for a query, fetch a small
 batch of web images for it, de-duplicate them, and add them to the collection.
 
-Image search goes through DuckDuckGo with a Wikipedia/Wikimedia fallback. Requests use an
-honest User-Agent and polite delays.
+Images come from Wikimedia Commons (official API, freely licensed), topped up from DuckDuckGo
+image search when Commons has too few. Requests use an honest User-Agent and polite delays.
 """
 from __future__ import annotations
 
@@ -26,7 +26,7 @@ log = logging.getLogger(__name__)
 
 # Wikimedia asks API clients to identify themselves; set IMRS_USER_AGENT to include your contact URL/email.
 USER_AGENT = os.environ.get("IMRS_USER_AGENT", "IMRS/1.0 (open-source image retrieval demo)")
-WIKI_API = "https://en.wikipedia.org/w/api.php"
+COMMONS_API = "https://commons.wikimedia.org/w/api.php"
 
 
 @dataclass
@@ -64,7 +64,7 @@ def _ddgs():
     return DDGS
 
 
-def ddg_image_urls(query: str, n: int, max_tries: int = 4) -> list[str]:
+def ddg_image_urls(query: str, n: int, max_tries: int = 2) -> list[str]:
     DDGS = _ddgs()
     for attempt in range(max_tries):
         try:
@@ -78,48 +78,50 @@ def ddg_image_urls(query: str, n: int, max_tries: int = 4) -> list[str]:
     return []
 
 
-def wikipedia_image_urls(term: str, n: int, session=None) -> list[str]:
+_FILLER = re.compile(r"^(an? |the )?((photo|picture|image|close-up) of (an? |the )?)?", re.I)
+
+
+def search_query(term: str) -> str:
+    """'a photo of a golden retriever' -> 'golden retriever' (search engines match keywords)."""
+    return _FILLER.sub("", term.strip()).strip() or term
+
+
+def commons_image_urls(term: str, n: int, session=None) -> list[str]:
+    """Wikimedia Commons file search: an official API, and every result is freely licensed."""
     import requests
 
     s = session or requests.Session()
     s.headers["User-Agent"] = USER_AGENT
-    urls: list[str] = []
     try:
-        titles = s.get(WIKI_API, params={"action": "opensearch", "search": term, "limit": 5,
-                                         "namespace": 0, "format": "json"}, timeout=15).json()[1]
-        for title in titles:
-            pages = s.get(WIKI_API, params={"action": "query", "titles": title, "prop": "pageimages|images",
-                                            "pithumbsize": 512, "imlimit": 50, "format": "json"},
-                          timeout=15).json().get("query", {}).get("pages", {})
-            for page in pages.values():
-                if thumb := page.get("thumbnail", {}).get("source"):
-                    urls.append(thumb)
-                files = [im["title"] for im in page.get("images", [])
-                         if im.get("title", "").lower().endswith((".jpg", ".jpeg", ".png"))]
-                if files:
-                    info = s.get(WIKI_API, params={"action": "query", "titles": "|".join(files[:20]),
-                                                   "prop": "imageinfo", "iiprop": "url", "iiurlwidth": 512,
-                                                   "format": "json"}, timeout=15).json()
-                    for p in info.get("query", {}).get("pages", {}).values():
-                        for ii in p.get("imageinfo", []):
-                            if u := ii.get("thumburl") or ii.get("url"):
-                                urls.append(u)
-            if len(urls) >= n:
-                break
+        js = s.get(COMMONS_API, params={
+            "action": "query", "format": "json", "generator": "search", "gsrnamespace": 6,
+            "gsrsearch": f"{search_query(term)} filetype:bitmap", "gsrlimit": min(50, n * 2),
+            "prop": "imageinfo", "iiprop": "url|mime", "iiurlwidth": 512,
+        }, timeout=20).json()
     except Exception as e:
-        log.info("wikipedia lookup failed for %r: %s", term, e)
-    return list(dict.fromkeys(urls))[:n]
+        log.info("commons lookup failed for %r: %s", term, e)
+        return []
+    pages = sorted(js.get("query", {}).get("pages", {}).values(), key=lambda p: p.get("index", 0))
+    urls = [ii.get("thumburl") or ii.get("url") for p in pages for ii in p.get("imageinfo", [])
+            if ii.get("mime") in ("image/jpeg", "image/png", "image/webp")]
+    return [u for u in urls if u][:n]
+
+
+_PREPOSITION = re.compile(r"\s+(on|in|at|with|near|under|over|by|of|from)\s+", re.I)
 
 
 def image_urls(term: str, n: int) -> list[str]:
-    urls: list[str] = []
-    try:
-        urls = ddg_image_urls(term, n)
-    except ImportError:
-        log.warning("ddgs / duckduckgo-search not installed; using Wikipedia only")
+    urls = commons_image_urls(term, n)
+    head = _PREPOSITION.split(search_query(term))[0]
+    if len(urls) < n and head != search_query(term):
+        # "red sports car on a racetrack" -> "red sports car": fewer AND-ed keywords, more hits
+        urls += commons_image_urls(head, n - len(urls))
     if len(urls) < n:
-        urls += wikipedia_image_urls(term, n - len(urls))
-    return urls[:n]
+        try:
+            urls += ddg_image_urls(search_query(term), n - len(urls))
+        except ImportError:
+            log.info("ddgs / duckduckgo-search not installed; using Wikimedia Commons only")
+    return list(dict.fromkeys(urls))[:n]
 
 
 # ----------------------------------------------------------------------------------------

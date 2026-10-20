@@ -123,7 +123,7 @@ def show_results(hits, policy: CoveragePolicy | None = None):
             good = policy is None or score >= policy.min_score
             badge = "🆕 " if path.startswith(DYNAMIC_PREFIX) else ""
             if fp.exists():
-                st.image(str(fp), use_container_width=True)
+                st.image(str(fp), width="stretch")
             st.caption(f"{badge}**{label}** · {score:.3f}{'' if good else ' ·  weak'}")
 
 
@@ -175,7 +175,7 @@ with tab_search:
         if up:
             img = Image.open(io.BytesIO(up.read())).convert("RGB")
             c1, c2 = st.columns([1, 5])
-            c1.image(img, caption="Query", use_container_width=True)
+            c1.image(img, caption="Query", width="stretch")
             q = embedder.embed_pils([img])
             hits, ms = search(q)
             with c2:
@@ -217,7 +217,7 @@ with tab_manage:
             rel = {f.name: f.relative_to(settings.data_root).as_posix() for f in files}
             cols = st.columns(8)
             for i, f in enumerate(files[:48]):
-                cols[i % 8].image(str(f), caption=f.name[-14:], use_container_width=True)
+                cols[i % 8].image(str(f), caption=f.name[-14:], width="stretch")
             picked = st.multiselect("Remove images", list(rel), key=f"rm_{d.name}")
             c1, c2 = st.columns(2)
             if c1.button("Remove selected", key=f"btn_{d.name}", disabled=not picked):
@@ -241,7 +241,7 @@ with tab_bench:
         st.info("No benchmark results yet. Run `imrs bench` and `imrs report`.")
     else:
         df = pd.read_csv(results)
-        st.dataframe(df, use_container_width=True, hide_index=True)
+        st.dataframe(df, width="stretch", hide_index=True)
         for png in sorted(bench_dir.glob("*.png")):
             st.image(str(png), caption=png.stem)
 

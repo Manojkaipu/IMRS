@@ -77,3 +77,10 @@ def test_vector_store_switch_index():
     for name in INDEXERS:
         store.set_indexer(name)
         assert store.search(X[7], 1)[0][0][0] == "7"
+
+
+@pytest.mark.parametrize("name", INDEXERS)
+def test_every_index_handles_tiny_collections(name):
+    X = unit_vectors(40, 16)
+    sims, pos = build_index(name, X).search(X[:3], 5)
+    assert pos.shape == (3, 5)
