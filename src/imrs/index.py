@@ -152,6 +152,8 @@ def build_index(name: str, X: np.ndarray, **params) -> AnnIndex:
     else:
         raise ValueError(f"Unknown indexer '{name}'. Choose from: {', '.join(INDEXERS)}")
     index.add(X)
+    if isinstance(index, AnnoyIndex):
+        index._build()  # build eagerly so build time is measured here, not on the first query
     return index
 
 

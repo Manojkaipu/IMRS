@@ -16,7 +16,57 @@ pulls a small, de-duplicated batch of images from the web, embeds them and adds 
 ## Results
 
 <!-- RESULTS:START -->
-_Run `imrs bench` + `imrs report` to populate._
+Caltech-256, 29,601 images in 256 classes, 2,000 stratified leave-one-out queries, CPU only
+(full table: [docs/BENCHMARKS.md](docs/BENCHMARKS.md)).
+
+**Encoders** (exact search)
+
+| encoder | dim | mAP@10 | P@10 | Hit@1 |
+|---|---|---|---|---|
+| **DINOv2 ViT-S/14** | 384 | **0.842** | **0.869** | **0.909** |
+| ViT-B/16 (ImageNet) | 768 | 0.731 | 0.770 | 0.831 |
+| CLIP ViT-B/32 | 512 | 0.727 | 0.769 | 0.834 |
+| ResNet-50 (ImageNet) | 2048 | 0.672 | 0.721 | 0.795 |
+| DINOv2 + query expansion (top-2) | 384 | 0.862 | 0.881 | 0.909 |
+
+Self-supervised DINOv2 (384-d) beats the ImageNet-supervised ViT-B/16 (768-d) and ResNet-50 (2048-d) by 11 and 17 mAP points.
+
+**Indexes** (CLIP ViT-B/32, default parameters)
+
+| index | neighbour recall@10 | mAP@10 | p50 latency | batched QPS | size |
+|---|---|---|---|---|---|
+| Flat (exact) | 1.000 | 0.727 | 3.75 ms | 5.3k | 57.8 MB |
+| **HNSW** (M=32, ef=64) | **0.999** | **0.727** | **0.16 ms** | 15.3k | 65.5 MB |
+| IVF-Flat (nprobe=8) | 0.943 | 0.731 | 0.08 ms | 42.7k | 59.4 MB |
+| IVF-PQ (64 B/vector) | 0.721 | 0.731 | 0.07 ms | 57.7k | **3.9 MB** |
+| Annoy (50 trees) | 0.852 | 0.697 | 0.38 ms | 2.4k | 77.3 MB |
+
+* **HNSW is the default**: 23× lower latency than brute force with no measurable quality loss.
+* **IVF-PQ shrinks the index 15×** and keeps class-level mAP, even though it recovers only 72% of the exact
+  neighbours. Class-level retrieval is tolerant to neighbour swaps *within* a class, so neighbour recall
+  and task metrics have to be reported separately.
+* IVF with a small `nprobe` slightly *raises* mAP (0.743 at nprobe=2 vs 0.727 exact): searching only nearby
+  clusters acts as an implicit same-class filter.
+
+![Recall vs QPS](docs/images/results/sweep_clip_vit_b32.png)
+
+**Fine-tuned adapter** (CLIP ViT-B/32, evaluated on 128 classes never seen in training)
+
+| model | held-out mAP@10 | Hit@1 |
+|---|---|---|
+| frozen CLIP | 0.768 | 0.865 |
+| + residual adapter, SupCon | 0.780 | – |
+| **+ residual adapter, batch-hard triplet** | **0.804** (+3.6) | **0.880** |
+
+Training for all 30 epochs *lowered* held-out mAP (0.768 → 0.719 with SupCon); validation mAP on a separate
+set of classes peaked after one epoch. Early stopping on those validation classes turned the regression
+into a gain. Each run takes about 15 s on a CPU because the adapter trains on cached embeddings.
+
+**Expansion trigger**: with each class's text prompt run against the gallery with and without that class,
+the "fewer than 3 results above threshold" rule separates known from unknown concepts with
+**ROC-AUC 0.92**. The best threshold is cosine **0.33** (TPR 0.79, FPR 0.08). Text→image P@10 is 0.945.
+
+![mAP by encoder](docs/images/results/map_by_backbone.png)
 <!-- RESULTS:END -->
 
 ## How it works
@@ -28,9 +78,10 @@ flowchart LR
     I --> R[top-k results]
     R --> C{coverage<br/>weak?}
     C -- no --> U[show results]
-    C -- yes --> W[web image search<br/>DuckDuckGo → Wikimedia]
+    C -- yes --> W[web image search<br/>Wikimedia Commons → DuckDuckGo]
     W --> D[download · pHash de-dup · resize]
-    D --> E2[embed new images]
+    D --> V[CLIP text-image check<br/>drop off-topic downloads]
+    V --> E2[embed new images]
     E2 --> I
     E2 --> K[(embedding cache<br/>runs/cache)]
 ```
@@ -109,7 +160,7 @@ src/imrs/
   report.py      markdown leaderboard + plots
   cli.py         `imrs` command
 app/streamlit_app.py
-tests/           34 tests; synthetic data + a fake encoder, so they run in seconds offline
+tests/           40 tests; synthetic data + a fake encoder, so they run in seconds offline
 ```
 
 ## Design notes
@@ -125,7 +176,7 @@ tests/           34 tests; synthetic data + a fake encoder, so they run in secon
 
 ## Limitations & next steps
 
-* Web expansion trusts the search engine's labels; images aren't verified before indexing. A CLIP
-  text-image agreement filter on downloads would reduce noise.
+* Download verification uses CLIP itself, so it shares CLIP's blind spots; a poorly-named concept can still
+  pull in off-topic images that CLIP happens to agree with.
 * Relevance is class-level. Caltech-256 has no fine-grained or instance-level ground truth.
 * Benchmarks are CPU-only. On GPU the encoders, not the indexes, dominate latency.

@@ -9,9 +9,11 @@ Protocol (leave-one-out over a stratified query sample):
 from __future__ import annotations
 
 import logging
+import tempfile
 import time
 from dataclasses import dataclass, field
 from functools import partial
+from pathlib import Path
 
 import numpy as np
 
@@ -93,6 +95,14 @@ def _search_excluding_self(index: AnnIndex, X: np.ndarray, q_idx: np.ndarray, k:
 def index_size_bytes(index: AnnIndex) -> int | None:
     if hasattr(index, "faiss"):
         return int(index.faiss.serialize_index(index.index).nbytes)
+    if getattr(index, "_ann", None) is not None:  # Annoy: size of the forest on disk
+        with tempfile.TemporaryDirectory() as d:
+            fp = Path(d) / "a.ann"
+            index._ann.save(str(fp))
+            n = fp.stat().st_size
+            index._ann.unload()
+        index._ann = None  # unload() invalidates it; rebuild lazily if searched again
+        return n
     return None
 
 

@@ -93,8 +93,8 @@ with st.sidebar:
     st.divider()
     st.subheader("Self-expansion")
     auto_expand = st.toggle("Fetch web images when coverage is weak", value=True)
-    min_score = st.slider("Coverage threshold (cosine)", 0.0, 1.0, 0.25, 0.01,
-                          help="Text→image CLIP scores are low (≈0.2–0.35). Tune with `imrs calibrate`.")
+    min_score = st.slider("Coverage threshold (cosine)", 0.0, 1.0, 0.33, 0.01,
+                          help="Default 0.33 is calibrated for CLIP ViT-B/32 (`imrs calibrate`, ROC-AUC 0.92).")
     min_good = st.number_input("…needed above threshold", 1, 20, 3)
     per_term = st.number_input("Images per expansion", 5, 100, 20)
     verify_min = st.slider("Verify downloads: min CLIP score", 0.0, 0.4, 0.2, 0.01,

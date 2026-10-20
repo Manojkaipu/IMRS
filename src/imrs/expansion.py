@@ -37,7 +37,7 @@ class CoveragePolicy:
     image->image cosines are much higher. Calibrate it with `imrs calibrate`.
     """
 
-    min_score: float = 0.25
+    min_score: float = 0.33  # `imrs calibrate` on Caltech-256 + CLIP ViT-B/32: ROC-AUC 0.92 at this threshold
     min_good: int = 3
 
     def is_weak(self, scores: Sequence[float]) -> bool:

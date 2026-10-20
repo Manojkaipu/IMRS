@@ -66,7 +66,8 @@ def test_finetune_then_bench_on_heldout(settings, fake_backbone):
     meta = finetune(settings, FinetuneConfig(backbone=fake_backbone, epochs=2, classes_per_batch=2,
                                              samples_per_class=4, hidden=16))
     assert (settings.checkpoint_dir / "proj_fake.pt").exists()
-    assert len(meta["history"]) == 2
+    assert 1 <= len(meta["history"]) <= 2
+    assert meta["val_mAP@10_best"] >= meta["val_mAP@10_before"]  # early stopping keeps the best epoch (or identity)
     rows = run_benchmark(settings, [fake_backbone + "_ft"], ["flat"], BenchConfig(k=5, n_queries=20))
     assert rows[0]["eval_classes"] == "heldout"  # forced: never evaluate on training classes
     assert rows[0]["n_gallery"] == 48

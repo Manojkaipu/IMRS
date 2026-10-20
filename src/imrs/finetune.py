@@ -11,6 +11,7 @@ Batches are P classes x K images so every anchor has positives and hard negative
 """
 from __future__ import annotations
 
+import copy
 import logging
 from dataclasses import asdict, dataclass
 
@@ -40,7 +41,8 @@ class FinetuneConfig:
     temperature: float = 0.1  # supcon
     margin: float = 0.2  # triplet
     hidden: int = 1024
-    val_frac: float = 0.15  # of training classes, used for epoch-level monitoring only
+    val_frac: float = 0.15  # of training classes; selects the best epoch (early stopping)
+    patience: int = 5  # stop after this many epochs without a val improvement
     split_seed: int = 0
     seed: int = 0
 
@@ -103,6 +105,8 @@ def finetune(settings: Settings, cfg: FinetuneConfig) -> dict:
     history = []
     base_val = retrieval_map(Z[val], labels[val])
     log.info("epoch 0 | val mAP@10 %.4f (frozen backbone)", base_val)
+    # epoch 0 is the identity (zero-initialised last layer), so the adapter can't end up worse than frozen on val
+    best_val, best_epoch, best_state = base_val, 0, copy.deepcopy(head.state_dict())
     for epoch in range(1, cfg.epochs + 1):
         head.train()
         losses = []
@@ -119,11 +123,19 @@ def finetune(settings: Settings, cfg: FinetuneConfig) -> dict:
         val_map = retrieval_map(apply_projection(head, Z[val], device), labels[val])
         history.append({"epoch": epoch, "loss": float(np.mean(losses)), "val_mAP@10": val_map})
         log.info("epoch %d | loss %.4f | val mAP@10 %.4f", epoch, history[-1]["loss"], val_map)
+        if val_map > best_val:
+            best_val, best_epoch, best_state = val_map, epoch, copy.deepcopy(head.state_dict())
+        elif epoch - best_epoch >= cfg.patience:
+            log.info("early stop: no val improvement since epoch %d", best_epoch)
+            break
 
+    head.load_state_dict(best_state)
     result = {
         "heldout_mAP@10_before": retrieval_map(Z[test], labels[test]),
         "heldout_mAP@10_after": retrieval_map(apply_projection(head, Z[test], device), labels[test]),
         "val_mAP@10_before": base_val,
+        "val_mAP@10_best": best_val,
+        "best_epoch": best_epoch,
     }
     meta = {**asdict(cfg), **result, "dim": int(Z.shape[1]), "history": history}
     fp = save_projection(head.cpu(), settings.checkpoint_dir, cfg.backbone, meta)

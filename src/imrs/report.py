@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pandas as pd
 
-SHOW = ["backbone", "indexer", "eval_classes", "mAP@10", "P@10", "R@10", "nDCG@10", "Hit@1",
+SHOW = ["backbone", "indexer", "eval_classes", "query_expansion", "mAP@10", "P@10", "R@10", "nDCG@10", "Hit@1",
         "ann_recall@10", "latency_ms_p50", "qps_batch", "build_s", "index_mb"]
 
 
@@ -30,11 +30,18 @@ def markdown_table(df: pd.DataFrame) -> str:
 def plot_map(df: pd.DataFrame, out_png: Path) -> None:
     import matplotlib.pyplot as plt
 
-    flat = df[df["indexer"] == "flat"].sort_values("mAP@10")
+    flat = df[df["indexer"] == "flat"]
+    if "query_expansion" in flat:
+        flat = flat.assign(qe=flat["query_expansion"].fillna(0).astype(int))
+    else:
+        flat = flat.assign(qe=0)
+    # one bar per configuration (latest run wins), so re-runs don't stack duplicate labels
+    flat = flat.drop_duplicates(["backbone", "eval_classes", "qe"], keep="last").sort_values("mAP@10")
     if flat.empty:
         return
     fig, ax = plt.subplots(figsize=(7, 0.45 * len(flat) + 1.2))
-    labels = [f"{b} ({e})" for b, e in zip(flat["backbone"], flat["eval_classes"])]
+    labels = [f"{b} ({e}{f', +QE{q}' if q else ''})"
+              for b, e, q in zip(flat["backbone"], flat["eval_classes"], flat["qe"])]
     ax.barh(labels, flat["mAP@10"], color="#4C72B0")
     for i, v in enumerate(flat["mAP@10"]):
         ax.text(v + 0.005, i, f"{v:.3f}", va="center", fontsize=9)
