@@ -1,6 +1,6 @@
 # IMRS — Self-Expanding Image Retrieval
 
-[![CI](https://github.com/Manojkaipu/Image_Retrieval_System/actions/workflows/ci.yml/badge.svg)](https://github.com/Manojkaipu/Image_Retrieval_System/actions/workflows/ci.yml)
+[![CI](https://github.com/Manojkaipu/IMRS/actions/workflows/ci.yml/badge.svg)](https://github.com/Manojkaipu/IMRS/actions/workflows/ci.yml)
 
 Text→image and image→image search over **Caltech-256** that **notices when it doesn't know a
 concept and teaches itself**: if no image in the collection matches a query well enough, it
