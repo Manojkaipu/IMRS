@@ -63,7 +63,17 @@ def evaluate_rankings(ranked_labels: np.ndarray, query_labels: np.ndarray,
     return {name: float(v) for name, v in out.items()}
 
 
-def neighbor_recall(approx: np.ndarray, exact: np.ndarray, k: int) -> float:
-    """Fraction of the exact top-k neighbours an ANN index recovers (the standard ANN recall)."""
-    hits = [len(np.intersect1d(a[:k], e[:k])) for a, e in zip(approx, exact)]
+def neighbor_recall(approx: np.ndarray, exact: np.ndarray, k: int,
+                    approx_sims: np.ndarray | None = None, exact_sims: np.ndarray | None = None,
+                    eps: float = 1e-5) -> float:
+    """Fraction of the exact top-k neighbours an ANN index recovers (the standard ANN recall).
+
+    With similarities given, a returned neighbour counts if it is at least as close as the
+    exact k-th neighbour (as in ann-benchmarks), so ties at the boundary that two exact
+    searches break differently are not scored as misses.
+    """
+    if approx_sims is None or exact_sims is None:
+        hits = [len(np.intersect1d(a[:k], e[:k])) for a, e in zip(approx, exact)]
+    else:
+        hits = (approx_sims[:, :k] >= exact_sims[:, k - 1: k] - eps).sum(axis=1)
     return float(np.mean(hits)) / k

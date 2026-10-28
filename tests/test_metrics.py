@@ -58,3 +58,12 @@ def test_neighbor_recall():
     approx = np.array([[1, 2, 3], [4, 5, 6]])
     exact = np.array([[1, 2, 9], [4, 5, 6]])
     assert neighbor_recall(approx, exact, 3) == pytest.approx((2 + 3) / 6)
+
+
+def test_neighbor_recall_counts_ties_at_kth_as_hits():
+    # 3 and 9 are equally similar to the query; exact search kept 9, the index kept 3
+    approx, exact = np.array([[1, 2, 3]]), np.array([[1, 2, 9]])
+    assert neighbor_recall(approx, exact, 3, np.array([[0.9, 0.8, 0.7]]),
+                           np.array([[0.9, 0.8, 0.7]])) == pytest.approx(1.0)
+    assert neighbor_recall(approx, exact, 3, np.array([[0.9, 0.8, 0.6]]),
+                           np.array([[0.9, 0.8, 0.7]])) == pytest.approx(2 / 3)

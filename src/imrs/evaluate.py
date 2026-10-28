@@ -78,6 +78,12 @@ def _drop_self(sims: np.ndarray, pos: np.ndarray, q_idx: np.ndarray, k: int) -> 
     return out_s, out_p
 
 
+def _true_sims(X: np.ndarray, q_idx: np.ndarray, pos: np.ndarray) -> np.ndarray:
+    """Exact similarities of returned neighbours (PQ indexes only report approximate ones)."""
+    s = np.einsum("qd,qkd->qk", X[q_idx], X[np.clip(pos, 0, None)])
+    return np.where(pos >= 0, s, -np.inf)
+
+
 def _search_excluding_self(index: AnnIndex, X: np.ndarray, q_idx: np.ndarray, k: int,
                            qe: int = 0) -> tuple[np.ndarray, np.ndarray, float]:
     t0 = time.perf_counter()
@@ -107,7 +113,7 @@ def index_size_bytes(index: AnnIndex) -> int | None:
 
 
 def benchmark_index(X: np.ndarray, labels: np.ndarray, indexer: str, cfg: BenchConfig,
-                    q_idx: np.ndarray, exact_pos: np.ndarray | None = None) -> dict:
+                    q_idx: np.ndarray, exact: tuple[np.ndarray, np.ndarray] | None = None) -> dict:
     k = cfg.k
     t0 = time.perf_counter()
     index = build_index(indexer, X, **cfg.index_params.get(indexer, {}))
@@ -132,8 +138,9 @@ def benchmark_index(X: np.ndarray, labels: np.ndarray, indexer: str, cfg: BenchC
         "latency_ms_p95": float(np.percentile(lat, 95)),
         "index_mb": (lambda b: None if b is None else b / 2**20)(index_size_bytes(index)),
     }
-    if exact_pos is not None and cfg.query_expansion == 0:
-        row[f"ann_recall@{k}"] = neighbor_recall(pos, exact_pos, k)
+    if exact is not None and cfg.query_expansion == 0:
+        exact_sims, exact_pos = exact
+        row[f"ann_recall@{k}"] = neighbor_recall(pos, exact_pos, k, _true_sims(X, q_idx, pos), exact_sims)
     return row
 
 
@@ -151,13 +158,13 @@ def run_benchmark(settings: Settings, backbones: list[str], indexers: list[str],
         mask = eval_subset(images, cfg_b)
         X, labels = Z[mask], images.labels[mask]
         q_idx = sample_queries(labels, cfg.n_queries, seed=cfg.query_seed)
-        _, exact_pos = _drop_self(*exact_search(X, X[q_idx], cfg.k + 1), q_idx, cfg.k)
+        exact = _drop_self(*exact_search(X, X[q_idx], cfg.k + 1), q_idx, cfg.k)
         for indexer in indexers:
             log.info("bench %s / %s on %d images (%d queries)", backbone, indexer, len(X), len(q_idx))
             row = {"backbone": backbone, "indexer": indexer, "eval_classes": eval_classes,
                    "n_gallery": len(X), "n_queries": len(q_idx), "dim": X.shape[1], "k": cfg.k,
                    "query_expansion": cfg.query_expansion}
-            row.update(benchmark_index(X, labels, indexer, cfg_b, q_idx, exact_pos))
+            row.update(benchmark_index(X, labels, indexer, cfg_b, q_idx, exact))
             log.info("  %s", {k: round(v, 4) if isinstance(v, float) else v for k, v in row.items()})
             rows.append(row)
     return rows
@@ -178,7 +185,7 @@ def run_sweep(settings: Settings, backbone: str, indexers: list[str], cfg: Bench
     mask = eval_subset(images, cfg)
     X, labels = Z[mask], images.labels[mask]
     q_idx = sample_queries(labels, cfg.n_queries, seed=cfg.query_seed)
-    _, exact_pos = _drop_self(*exact_search(X, X[q_idx], cfg.k + 1), q_idx, cfg.k)
+    exact_sims, exact_pos = _drop_self(*exact_search(X, X[q_idx], cfg.k + 1), q_idx, cfg.k)
     counts = np.bincount(labels)
     rows = []
     for indexer in indexers:
@@ -193,7 +200,8 @@ def run_sweep(settings: Settings, backbone: str, indexers: list[str], cfg: Bench
             ranked = np.where(pos >= 0, labels[np.clip(pos, 0, None)], -1)
             m = evaluate_rankings(ranked, labels[q_idx], counts[labels[q_idx]] - 1, cfg.k)
             rows.append({"backbone": backbone, "indexer": indexer, "param": knob, "value": v,
-                         f"ann_recall@{cfg.k}": neighbor_recall(pos, exact_pos, cfg.k),
+                         f"ann_recall@{cfg.k}": neighbor_recall(pos, exact_pos, cfg.k,
+                                                                          _true_sims(X, q_idx, pos), exact_sims),
                          f"mAP@{cfg.k}": m[f"mAP@{cfg.k}"], "qps_batch": len(q_idx) / secs})
             log.info("sweep %s %s=%s -> %s", indexer, knob, v, rows[-1])
     return rows
